@@ -152,7 +152,8 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     ;; TODO: send :close message after buffer discarded
     (add-hook 'after-change-functions #'teamtype--after-change nil t))
    (t
-    (teamtype--disconnect-from-daemon))))
+    (teamtype--disconnect-from-daemon)
+    (remove-hook 'after-change-functions #'teamtype--after-change))))
 
 (provide 'teamtype)
 ;;; teamtype.el ends here
