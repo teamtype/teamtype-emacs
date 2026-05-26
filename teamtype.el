@@ -30,6 +30,7 @@
 
 (require 'jsonrpc)
 (require 'browse-url)
+(require 'eglot)
 
 (defcustom teamtype-client-command (list "teamtype" "client")
   "Command used to connect to teamtype daemon."
@@ -37,6 +38,10 @@
 
 (defvar-local teamtype--daemon-connection nil
   "Reference to the current daemon connection.")
+(defvar-local teamtype--editor-revision 0
+  "Editor revision in the current buffer.")
+(defvar-local teamtype--daemon-revision 0
+  "Daemon revision in the current buffer.")
 
 (defun teamtype--connect-to-daemon (directory)
   "Create a connection to the daemon in the current directory"
@@ -60,6 +65,9 @@
     ;; TODO: send something to say we're going away?
     (jsonrpc-shutdown teamtype--daemon-connection)))
 
+(defun teamtype--current-buffer-uri ()
+  (browse-url-file-url (buffer-file-name (current-buffer))))
+
 (defun teamtype--open-file (buffer)
   (let ((file-uri (browse-url-file-url (buffer-file-name buffer)))
         (content (with-current-buffer buffer
@@ -70,6 +78,25 @@
      (list :uri file-uri
            :content content))))
 
+(defun teamtype--pos-to-teamtype-position (pos)
+  (eglot--widening
+   (list :line (1- (line-number-at-pos pos t))
+         :character (progn (goto-char pos)
+                           (eglot-utf-32-linepos)))))
+
+(defun teamtype--after-change (start end length)
+  (cl-incf teamtype--editor-revision)
+  (message "start %s end %s length %s" start end length)
+  (let ((delta (list :range (list :start (teamtype--pos-to-teamtype-position start)
+                                  :end (teamtype--pos-to-teamtype-position end))
+                     :replacement (buffer-substring-no-properties start end))))
+   (jsonrpc-async-request
+    teamtype--daemon-connection
+    :edit
+    (list :uri (teamtype--current-buffer-uri)
+          :revision teamtype--daemon-revision
+          :delta delta))))
+
 (defvar teamtype-client-mode) ; forward decl
 (define-minor-mode teamtype-client-mode
   "Minor mode for editing a document that is being collaborated with via Teamtype.
@@ -79,9 +106,10 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
    (teamtype-client-mode
     ;; TODO: change default-directory to be parent directory containing .teamtype directory
     (teamtype--connect-to-daemon default-directory)
-    (teamtype--open-file (current-buffer)))
+    (teamtype--open-file (current-buffer))
+    (add-hook 'after-change-functions #'teamtype--after-change nil t))
    (t
-    (teamtype--disconnect-from-daemon teamtype--daemon-connection))))
+    (teamtype--disconnect-from-daemon))))
 
 (provide 'teamtype)
 ;;; teamtype.el ends here
