@@ -29,6 +29,7 @@
 ;;; Code:
 
 (require 'jsonrpc)
+(require 'browse-url)
 
 (defcustom teamtype-client-command (list "teamtype" "client")
   "Command used to connect to teamtype daemon."
