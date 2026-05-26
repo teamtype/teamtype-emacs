@@ -49,33 +49,37 @@
     (when (string= "file" (url-type url))
       (url-unhex-string (url-filename url)))))
 
+(defvar-local teamtype--applying-server-edits nil)
+
 (defun teamtype--notification-dispatcher (_conn method params)
   (cl-case method
-    (cursor (message "CURSOR %s" params))
+    (cursor nil)
     (edit
      (let ((edited-buffer (thread-first (plist-get params :uri)
                                         (teamtype--uri-to-path)
                                         (get-file-buffer))))
        (with-current-buffer edited-buffer
          (if (= (plist-get params :revision) teamtype--editor-revision)
-             (atomic-change-group
-               (let ((change-group (prepare-change-group))
-                     (replacement (plist-get params :replacement)))
-                 (cl-incf teamtype--daemon-revision)
-                 (thread-last
-                   (plist-get params :delta)
-                   (reverse)
-                   (mapcar
-                    (lambda (edit)
-                      (pcase-let ((`(,beg . ,end) (eglot-range-region (plist-get edit :range)))
-                                  (replacement (plist-get edit :replacement)))
-                        `(,beg ,end . ,replacement))))
-                   (mapc
-                    (pcase-lambda (`(,beg ,end . ,replacement))
-                      ;; TODO: could use Emacs <30 if we replace `replace-region-contents'
-                      ;; with a fallback (see `eglot--apply-text-edits' for example)
-                      (replace-region-contents beg end replacement))))
-                 (undo-amalgamate-change-group change-group)))
+             (progn
+               (setf teamtype--applying-server-edits t)
+               (atomic-change-group
+                 (let ((change-group (prepare-change-group))
+                       (replacement (plist-get params :replacement)))
+                   (cl-incf teamtype--daemon-revision)
+                   (thread-last
+                     (plist-get params :delta)
+                     (reverse)
+                     (mapcar
+                      (lambda (edit)
+                        (pcase-let ((`(,beg . ,end) (eglot-range-region (plist-get edit :range)))
+                                    (replacement (plist-get edit :replacement)))
+                          `(,beg ,end . ,replacement))))
+                     (mapc
+                      (pcase-lambda (`(,beg ,end . ,replacement))
+                        ;; TODO: could use Emacs <30 if we replace `replace-region-contents'
+                        ;; with a fallback (see `eglot--apply-text-edits' for example)
+                        (replace-region-contents beg end replacement))))
+                   (undo-amalgamate-change-group change-group))))
            (warn "Got out-of-sync TeamType revision! Got %s, expected %s"
                  (plist-get params :revision) teamtype--editor-revision)))))))
 
@@ -125,17 +129,18 @@
                            (eglot-utf-32-linepos)))))
 
 (defun teamtype--after-change (start end length)
-  (cl-incf teamtype--editor-revision)
-  ;; TODO: debounce this?
-  (let ((delta (list :range (list :start (teamtype--pos-to-teamtype-position start)
-                                  :end (teamtype--pos-to-teamtype-position (+ start length)))
-                     :replacement (buffer-substring-no-properties start end))))
-   (jsonrpc-async-request
-    teamtype--daemon-connection
-    :edit
-    (list :uri (teamtype--current-buffer-uri)
-          :revision teamtype--daemon-revision
-          :delta (vector delta)))))
+  (unless teamtype--applying-server-edits
+    (cl-incf teamtype--editor-revision)
+    ;; TODO: debounce this?
+    (let ((delta (list :range (list :start (teamtype--pos-to-teamtype-position start)
+                                    :end (teamtype--pos-to-teamtype-position (+ start length)))
+                       :replacement (buffer-substring-no-properties start end))))
+      (jsonrpc-async-request
+       teamtype--daemon-connection
+       :edit
+       (list :uri (teamtype--current-buffer-uri)
+             :revision teamtype--daemon-revision
+             :delta (vector delta))))))
 
 (defvar teamtype-client-mode) ; forward decl
 (define-minor-mode teamtype-client-mode
