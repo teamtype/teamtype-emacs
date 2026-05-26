@@ -88,7 +88,7 @@
   (cl-incf teamtype--editor-revision)
   (message "start %s end %s length %s" start end length)
   (let ((delta (list :range (list :start (teamtype--pos-to-teamtype-position start)
-                                  :end (teamtype--pos-to-teamtype-position end))
+                                  :end (teamtype--pos-to-teamtype-position (+ start length)))
                      :replacement (buffer-substring-no-properties start end))))
    (jsonrpc-async-request
     teamtype--daemon-connection
