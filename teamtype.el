@@ -67,14 +67,13 @@
                    (reverse)
                    (mapcar
                     (lambda (edit)
-                      (pcase-let ((`(,beg . ,end) (eglot-range-region (plist-get params :range)))
-                                  (replacement (plist-get params :replacement)))
-                        (list beg end replacement))))
+                      (pcase-let ((`(,beg . ,end) (eglot-range-region (plist-get edit :range)))
+                                  (replacement (plist-get edit :replacement)))
+                        `(,beg ,end . ,replacement))))
                    (mapc
                     (pcase-lambda (`(,beg ,end . ,replacement))
                       ;; TODO: could use Emacs <30 if we replace `replace-region-contents'
                       ;; with a fallback (see `eglot--apply-text-edits' for example)
-                      (message "REPLACING CONTENT %s, %s with %s" beg end replacement)
                       (replace-region-contents beg end replacement))))
                  (undo-amalgamate-change-group change-group)))
            (warn "Got out-of-sync TeamType revision! Got %s, expected %s"
@@ -98,7 +97,7 @@
                                  (format "*teamtype %s stderr" directory))
                         :file-handler t)
                        ;; Removing for demo
-                       ;; :notification-dispatcher #'teamtype--notification-dispatcher
+                       :notification-dispatcher #'teamtype--notification-dispatcher
                        :on-shutdown (lambda (_conn) (setq teamtype--daemon-connection nil)))))
 
 (defun teamtype--disconnect-from-daemon ()
