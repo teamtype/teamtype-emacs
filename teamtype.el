@@ -3,7 +3,7 @@
 ;; Copyright (C) 2026 Jamie Cash, blinry
 
 ;; Author: Jamie Cash <jamie@occasionallycogent.com>, blinry <mail@blinry.org>
-;; Package-Requires: ((emacs "25.2"))
+;; Package-Requires: ((emacs "30.1"))
 ;; Version: 1.0
 ;; Keywords: tools, data, comm
 
@@ -43,6 +43,45 @@
 (defvar-local teamtype--daemon-revision 0
   "Daemon revision in the current buffer.")
 
+(defun teamtype--uri-to-path (uri)
+  "Convert file:// uri from TeamType to file path."
+  (let ((url (url-generic-parse-url uri)))
+    (when (string= "file" (url-type url))
+      (url-unhex-string (url-filename url)))))
+
+(defun teamtype--notification-dispatcher (_conn method params)
+  (cl-case method
+    (cursor (message "CURSOR %s" params))
+    (edit
+     (let ((edited-buffer (thread-first (plist-get params :uri)
+                                        (teamtype--uri-to-path)
+                                        (get-file-buffer))))
+       (with-current-buffer edited-buffer
+         (if (= (plist-get params :revision) teamtype--editor-revision)
+             (atomic-change-group
+               (let ((change-group (prepare-change-group))
+                     (replacement (plist-get params :replacement)))
+                 (cl-incf teamtype--daemon-revision)
+                 (thread-last
+                   (plist-get params :delta)
+                   (reverse)
+                   (mapcar
+                    (lambda (edit)
+                      (pcase-let ((`(,beg . ,end) (eglot-range-region (plist-get params :range)))
+                                  (replacement (plist-get params :replacement)))
+                        (list beg end replacement))))
+                   (mapc
+                    (pcase-lambda (`(,beg ,end . ,replacement))
+                      ;; TODO: could use Emacs <30 if we replace `replace-region-contents'
+                      ;; with a fallback (see `eglot--apply-text-edits' for example)
+                      (message "REPLACING CONTENT %s, %s with %s" beg end replacement)
+                      (replace-region-contents beg end replacement))))
+                 (undo-amalgamate-change-group change-group)))
+           (warn "Got out-of-sync TeamType revision! Got %s, expected %s"
+                 (plist-get params :revision) teamtype--editor-revision)))))))
+
+;; edit (:delta [(:range (:end (:character 24 :line 1) :start (:character 24 :line 1)) :replacement g)] :revision 5 :uri file:///Users/james/tmp/playground/hello.txt)
+
 (defun teamtype--connect-to-daemon (directory)
   "Create a connection to the daemon in the current directory"
   (setq teamtype--daemon-connection
@@ -58,6 +97,8 @@
                         :stderr (get-buffer-create
                                  (format "*teamtype %s stderr" directory))
                         :file-handler t)
+                       ;; Removing for demo
+                       ;; :notification-dispatcher #'teamtype--notification-dispatcher
                        :on-shutdown (lambda (_conn) (setq teamtype--daemon-connection nil)))))
 
 (defun teamtype--disconnect-from-daemon ()
@@ -86,7 +127,7 @@
 
 (defun teamtype--after-change (start end length)
   (cl-incf teamtype--editor-revision)
-  (message "start %s end %s length %s" start end length)
+  ;; TODO: debounce this?
   (let ((delta (list :range (list :start (teamtype--pos-to-teamtype-position start)
                                   :end (teamtype--pos-to-teamtype-position (+ start length)))
                      :replacement (buffer-substring-no-properties start end))))
@@ -95,7 +136,7 @@
     :edit
     (list :uri (teamtype--current-buffer-uri)
           :revision teamtype--daemon-revision
-          :delta delta))))
+          :delta (vector delta)))))
 
 (defvar teamtype-client-mode) ; forward decl
 (define-minor-mode teamtype-client-mode
@@ -105,8 +146,11 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
   (cond
    (teamtype-client-mode
     ;; TODO: change default-directory to be parent directory containing .teamtype directory
+    (setq teamtype--editor-revision 0)
+    (setq teamtype--daemon-revision 0)
     (teamtype--connect-to-daemon default-directory)
     (teamtype--open-file (current-buffer))
+    ;; TODO: send :close message after buffer discarded
     (add-hook 'after-change-functions #'teamtype--after-change nil t))
    (t
     (teamtype--disconnect-from-daemon))))
