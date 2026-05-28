@@ -78,7 +78,9 @@
                       (pcase-lambda (`(,beg ,end . ,replacement))
                         ;; TODO: could use Emacs <30 if we replace `replace-region-contents'
                         ;; with a fallback (see `eglot--apply-text-edits' for example)
-                        (replace-region-contents beg end replacement))))
+                        (if (> emacs-major-version 30)
+                            (replace-region-contents beg end replacement)
+                          (replace-region-contents beg end (lambda () replacement))))))
                    (undo-amalgamate-change-group change-group))))
            (warn "Got out-of-sync TeamType revision! Got %s, expected %s"
                  (plist-get params :revision) teamtype--editor-revision)))))))
