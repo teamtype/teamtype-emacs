@@ -81,7 +81,8 @@
                         (if (> emacs-major-version 30)
                             (replace-region-contents beg end replacement)
                           (replace-region-contents beg end (lambda () replacement))))))
-                   (undo-amalgamate-change-group change-group))))
+                   (undo-amalgamate-change-group change-group)))
+               (setf teamtype--applying-server-edits nil))
            (warn "Got out-of-sync TeamType revision! Got %s, expected %s"
                  (plist-get params :revision) teamtype--editor-revision)))))))
 
