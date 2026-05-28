@@ -83,8 +83,6 @@
            (warn "Got out-of-sync TeamType revision! Got %s, expected %s"
                  (plist-get params :revision) teamtype--editor-revision)))))))
 
-;; edit (:delta [(:range (:end (:character 24 :line 1) :start (:character 24 :line 1)) :replacement g)] :revision 5 :uri file:///Users/james/tmp/playground/hello.txt)
-
 (defun teamtype--connect-to-daemon (directory)
   "Create a connection to the daemon in the current directory"
   (setq teamtype--daemon-connection
@@ -150,6 +148,7 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
   (cond
    (teamtype-client-mode
     ;; TODO: change default-directory to be parent directory containing .teamtype directory
+    ;; TODO: turn off auto-revert-mode if enabled for this buffer?
     (setq teamtype--editor-revision 0)
     (setq teamtype--daemon-revision 0)
     (teamtype--connect-to-daemon default-directory)
