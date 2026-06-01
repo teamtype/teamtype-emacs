@@ -71,6 +71,12 @@
                      (reverse)
                      (mapcar
                       (lambda (edit)
+                        ;; XXX: this call to `eglot-range-region' should probably ensure that it's using utf-32 (default is utf-16)
+                        ;; (saw bug with adding accented characters to end of file (between emjoi?)
+                        ;; should have been
+                        ;; [👍]💪 äöüß scary
+                        ;; But we saw
+                        ;; [👍]äöüß scary💪
                         (pcase-let ((`(,beg . ,end) (eglot-range-region (plist-get edit :range)))
                                     (replacement (plist-get edit :replacement)))
                           `(,beg ,end . ,replacement))))
