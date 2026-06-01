@@ -160,7 +160,7 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     (add-hook 'after-change-functions #'teamtype--after-change nil t))
    (t
     (teamtype--disconnect-from-daemon)
-    (remove-hook 'after-change-functions #'teamtype--after-change))))
+    (remove-hook 'after-change-functions #'teamtype--after-change t))))
 
 (provide 'teamtype)
 ;;; teamtype.el ends here
