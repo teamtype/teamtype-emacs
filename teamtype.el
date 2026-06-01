@@ -170,6 +170,13 @@
                                 :end (teamtype--pos-to-teamtype-position end))))))))))
 
 (defvar teamtype-client-mode) ; forward decl
+
+(defun teamtype--supersession-threat-wrapper (f filename)
+  "Wrapper used for `:around' advice to make `ask-user-about-supersession-threat' not worry about the file changing out from under us when being managed by TeamType."
+  (if teamtype-client-mode
+      t
+    (funcall f filename)))
+
 (define-minor-mode teamtype-client-mode
   "Minor mode for editing a document that is being collaborated with via Teamtype.
 Run when editing a file in a directory managed by the Teamtype daemon (i.e. the direction in which either `teamtype share` or' `teamtype join ...' has been run."
@@ -177,7 +184,12 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
   (cond
    (teamtype-client-mode
     ;; TODO: change default-directory to be parent directory containing .teamtype directory
-    ;; TODO: turn off auto-revert-mode if enabled for this buffer?
+    ;; Disable buffer-local auto-revert
+    (auto-revert-mode -1)
+    ;; Make global-auto-revert-mode ignore this buffer
+    (add-to-list 'inhibit-auto-revert-buffers (current-buffer))
+    ;; Don't warn about buffer edits when file is changing out from under us
+    (advice-add 'ask-user-about-supersession-threat :around #'teamtype--supersession-threat-wrapper)
     (setq teamtype--editor-revision 0)
     (setq teamtype--daemon-revision 0)
     (teamtype--connect-to-daemon default-directory)
@@ -186,6 +198,10 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     (add-hook 'after-change-functions #'teamtype--after-change nil t)
     (add-hook 'post-command-hook #'teamtype--post-command nil t))
    (t
+    (advice-remove 'ask-user-about-supersession-threat
+                   #'teamtype--supersession-threat-wrapper)
+    (setq inhibit-auto-revert-buffers
+          (delq (current-buffer) inhibit-auto-revert-buffers))
     (teamtype--disconnect-from-daemon)
     (remove-hook 'post-command-hook #'teamtype--post-command t)
     (remove-hook 'after-change-functions #'teamtype--after-change t))))
