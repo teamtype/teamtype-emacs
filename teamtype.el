@@ -143,6 +143,32 @@
              :revision teamtype--daemon-revision
              :delta (vector delta))))))
 
+(defvar-local teamtype--my-cursor-position '((0 . 0)))
+
+(defun teamtype--current-cursor-positions ()
+  ;; TODO: if evil + visual block mode do something else?
+  ;; TODO: whatever multi-cursor packages?
+  (if (use-region-p)
+      (region-bounds)
+    (list (cons (point) (point)))))
+
+(defun teamtype--post-command ()
+  (let ((here (teamtype--current-cursor-positions)))
+    (when (not (equal here teamtype--my-cursor-position))
+      (setq teamtype--my-cursor-position here)
+      ;; TODO: debounce/throttle this?
+      (jsonrpc-async-request
+       teamtype--daemon-connection
+       :cursor
+       (list :uri (teamtype--current-buffer-uri)
+             :ranges (thread-last
+                       (teamtype--current-cursor-positions)
+                       (map
+                        'vector
+                        (pcase-lambda (`(,start . ,end))
+                          (list :start (teamtype--pos-to-teamtype-position start)
+                                :end (teamtype--pos-to-teamtype-position end))))))))))
+
 (defvar teamtype-client-mode) ; forward decl
 (define-minor-mode teamtype-client-mode
   "Minor mode for editing a document that is being collaborated with via Teamtype.
@@ -157,9 +183,11 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     (teamtype--connect-to-daemon default-directory)
     (teamtype--open-file (current-buffer))
     ;; TODO: send :close message after buffer discarded
-    (add-hook 'after-change-functions #'teamtype--after-change nil t))
+    (add-hook 'after-change-functions #'teamtype--after-change nil t)
+    (add-hook 'post-command-hook #'teamtype--post-command nil t))
    (t
     (teamtype--disconnect-from-daemon)
+    (remove-hook 'post-command-hook #'teamtype--post-command t)
     (remove-hook 'after-change-functions #'teamtype--after-change t))))
 
 (provide 'teamtype)
