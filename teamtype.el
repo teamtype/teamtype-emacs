@@ -169,7 +169,7 @@
        (list :uri (teamtype--current-buffer-uri)
              :ranges (thread-last
                        (teamtype--current-cursor-positions)
-                       (map
+                       (cl-map
                         'vector
                         (pcase-lambda (`(,start . ,end))
                           (list :start (teamtype--pos-to-teamtype-position start)
