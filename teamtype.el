@@ -42,6 +42,8 @@
   "Editor revision in the current buffer.")
 (defvar-local teamtype--daemon-revision 0
   "Daemon revision in the current buffer.")
+(defvar-local teamtype--cursors nil
+  "Associates user IDs with the cursor overlays.")
 
 (defun teamtype--uri-to-path (uri)
   "Convert file:// uri from TeamType to file path."
@@ -51,14 +53,31 @@
 
 (defvar-local teamtype--applying-server-edits nil)
 
+(defun teamtype--clear-user-cursors (userid)
+  (when-let ((user-overlays (assoc-string userid teamtype--cursors)))
+    (cl-map nil #'delete-overlay (cdr user-overlays))
+    (setf (cdr user-overlays) nil)))
+
 (defun teamtype--notification-dispatcher (_conn method params)
-  (cl-case method
-    (cursor nil)
-    (edit
-     (let ((edited-buffer (thread-first (plist-get params :uri)
-                                        (teamtype--uri-to-path)
-                                        (get-file-buffer))))
-       (with-current-buffer edited-buffer
+  (let ((edited-buffer (thread-first (plist-get params :uri)
+                                     (teamtype--uri-to-path)
+                                     (get-file-buffer))))
+    (with-current-buffer edited-buffer
+      (cl-case method
+        (cursor
+         (teamtype--clear-user-cursors (plist-get params :userid))
+         (thread-last
+           (plist-get params :ranges)
+           (cl-map 'list
+                   (lambda (range)
+                     (pcase-let ((`(,beg . ,end) (eglot-range-region range)))
+                       (let* ((end (if (= beg end) (+ end 1) end))
+                              (overlay (make-overlay beg end)))
+                         (overlay-put overlay 'face 'highlight)
+                         overlay))))
+           (cons (plist-get params :userid))
+           ((lambda (overlays) (push overlays teamtype--cursors)))))
+        (edit
          (if (= (plist-get params :revision) teamtype--editor-revision)
              (progn
                (setf teamtype--applying-server-edits t)
