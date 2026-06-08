@@ -193,7 +193,8 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     ;; Disable buffer-local auto-revert
     (auto-revert-mode -1)
     ;; Make global-auto-revert-mode ignore this buffer
-    (add-to-list 'inhibit-auto-revert-buffers (current-buffer))
+    (when (boundp 'inhibit-auto-revert-buffers)
+     (add-to-list 'inhibit-auto-revert-buffers (current-buffer)))
     ;; Don't warn about buffer edits when file is changing out from under us
     (advice-add 'ask-user-about-supersession-threat :around #'teamtype--supersession-threat-wrapper)
     (setq teamtype--editor-revision 0)
@@ -206,8 +207,9 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
    (t
     (advice-remove 'ask-user-about-supersession-threat
                    #'teamtype--supersession-threat-wrapper)
-    (setq inhibit-auto-revert-buffers
-          (delq (current-buffer) inhibit-auto-revert-buffers))
+    (when (boundp 'inhibit-auto-revert-buffers)
+     (setq inhibit-auto-revert-buffers
+           (delq (current-buffer) inhibit-auto-revert-buffers)))
     (teamtype--disconnect-from-daemon)
     (remove-hook 'post-command-hook #'teamtype--post-command t)
     (remove-hook 'after-change-functions #'teamtype--after-change t))))
