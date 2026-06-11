@@ -65,18 +65,32 @@
     (with-current-buffer edited-buffer
       (cl-case method
         (cursor
-         (teamtype--clear-user-cursors (plist-get params :userid))
-         (thread-last
-           (plist-get params :ranges)
-           (cl-map 'list
-                   (lambda (range)
-                     (pcase-let ((`(,beg . ,end) (eglot-range-region range)))
-                       (let* ((end (if (= beg end) (+ end 1) end))
-                              (overlay (make-overlay beg end)))
-                         (overlay-put overlay 'face 'highlight)
-                         overlay))))
-           (cons (plist-get params :userid))
-           ((lambda (overlays) (push overlays teamtype--cursors)))))
+         (let ((user-id (plist-get params :userid))
+               (user-name (thread-first
+                            (concat " " (or (plist-get params :name) "👻"))
+                            (propertize 'face 'shadow))))
+           (teamtype--clear-user-cursors user-id)
+           (thread-last
+             (plist-get params :ranges)
+             (cl-mapcan
+              (lambda (range)
+                (pcase-let ((`(,beg . ,end) (eglot-range-region range)))
+                  (list
+                   ;; create overlay for cursor
+                   (let* ((end (if (= beg end) (+ end 1) end))
+                          (overlay (make-overlay beg end)))
+                     (overlay-put overlay 'face 'highlight)
+                     overlay)
+                   ;; create overlay for name at end-of-line
+                   (let* ((eol (save-excursion
+                                 (goto-char beg)
+                                 (end-of-line)
+                                 (point)))
+                          (overlay (make-overlay eol eol)))
+                     (overlay-put overlay 'after-string user-name)
+                     overlay)))))
+             (cons user-id)
+             ((lambda (overlays) (push overlays teamtype--cursors))))))
         (edit
          (if (= (plist-get params :revision) teamtype--editor-revision)
              (progn
