@@ -154,12 +154,20 @@
          :character (progn (goto-char pos)
                            (eglot-utf-32-linepos)))))
 
+(defvar-local teamtype--edit-start nil)
+(defvar-local teamtype--edit-end nil)
+
+(defun teamtype--before-change (start end)
+  (unless teamtype--applying-server-edits
+    (setq teamtype--edit-start (teamtype--pos-to-teamtype-position start)
+          teamtype--edit-end (teamtype--pos-to-teamtype-position end))))
+
 (defun teamtype--after-change (start end length)
   (unless teamtype--applying-server-edits
     (cl-incf teamtype--editor-revision)
     ;; TODO: debounce this?
-    (let ((delta (list :range (list :start (teamtype--pos-to-teamtype-position start)
-                                    :end (teamtype--pos-to-teamtype-position (+ start length)))
+    (let ((delta (list :range (list :start teamtype--edit-start
+                                    :end teamtype--edit-end)
                        :replacement (buffer-substring-no-properties start end))))
       (jsonrpc-async-request
        teamtype--daemon-connection
@@ -221,6 +229,7 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     (teamtype--connect-to-daemon default-directory)
     (teamtype--open-file (current-buffer))
     ;; TODO: send :close message after buffer discarded
+    (add-hook 'before-change-functions #'teamtype--before-change nil t)
     (add-hook 'after-change-functions #'teamtype--after-change nil t)
     (add-hook 'post-command-hook #'teamtype--post-command nil t))
    (t
@@ -231,6 +240,7 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
            (delq (current-buffer) inhibit-auto-revert-buffers)))
     (teamtype--disconnect-from-daemon)
     (remove-hook 'post-command-hook #'teamtype--post-command t)
+    (remove-hook 'before-change-functions #'teamtype--before-change t)
     (remove-hook 'after-change-functions #'teamtype--after-change t))))
 
 (provide 'teamtype)
