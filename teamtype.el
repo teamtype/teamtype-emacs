@@ -199,7 +199,8 @@
   ;; TODO: if evil + visual block mode do something else?
   ;; TODO: whatever multi-cursor packages?
   (if (use-region-p)
-      (region-bounds)
+      (pcase-let ((`((,start . , end)) (region-bounds)))
+        (list (cons start (1+ end))))
     (list (cons (point) (point)))))
 
 (defun teamtype--post-command ()
