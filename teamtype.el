@@ -82,6 +82,11 @@
                      (overlay-put overlay 'face 'highlight)
                      overlay)
                    ;; create overlay for name at end-of-line
+                   ;; XXX: this shows the name for each cursor for the user;
+                   ;; kind of weird for, e.g. vim's block-selection,
+                   ;; but we want this for true-multi-cursor. Perhaps
+                   ;; sort by line and only show the name when there's
+                   ;; a discontinuity?
                    (let* ((eol (save-excursion
                                  (goto-char beg)
                                  (end-of-line)
