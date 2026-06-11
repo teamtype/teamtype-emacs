@@ -107,9 +107,11 @@
       (cl-case method
         (cursor
          (let ((user-id (plist-get params :userid))
-               (user-name (thread-first
-                            (concat " " (or (plist-get params :name) "👻"))
-                            (propertize 'face 'teamtype-other-user-name-face))))
+               (user-name (concat
+                           " "
+                           (thread-first
+                             (or (plist-get params :name) "👻")
+                             (propertize 'face 'teamtype-other-user-name-face)))))
            (teamtype--clear-user-cursors user-id)
            (thread-last
              (plist-get params :ranges)
