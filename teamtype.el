@@ -58,6 +58,10 @@
     (cl-map nil #'delete-overlay (cdr user-overlays))
     (setf (cdr user-overlays) nil)))
 
+(defun teamtype--range-region (range)
+  (let ((eglot-move-to-linepos-function #'eglot-move-to-utf-32-linepos))
+    (eglot-range-region range)))
+
 (defun teamtype--notification-dispatcher (_conn method params)
   (let ((edited-buffer (thread-first (plist-get params :uri)
                                      (teamtype--uri-to-path)
@@ -74,7 +78,7 @@
              (plist-get params :ranges)
              (cl-mapcan
               (lambda (range)
-                (pcase-let ((`(,beg . ,end) (eglot-range-region range)))
+                (pcase-let ((`(,beg . ,end) (teamtype--range-region range)))
                   (list
                    ;; create overlay for cursor
                    (let* ((end (if (= beg end) (+ end 1) end))
@@ -109,13 +113,7 @@
                      (reverse)
                      (mapcar
                       (lambda (edit)
-                        ;; XXX: this call to `eglot-range-region' should probably ensure that it's using utf-32 (default is utf-16)
-                        ;; (saw bug with adding accented characters to end of file (between emjoi?)
-                        ;; should have been
-                        ;; [👍]💪 äöüß scary
-                        ;; But we saw
-                        ;; [👍]äöüß scary💪
-                        (pcase-let ((`(,beg . ,end) (eglot-range-region (plist-get edit :range)))
+                        (pcase-let ((`(,beg . ,end) (teamtype--range-region (plist-get edit :range)))
                                     (replacement (plist-get edit :replacement)))
                           `(,beg ,end . ,replacement))))
                      (mapc
