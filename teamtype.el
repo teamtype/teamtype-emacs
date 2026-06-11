@@ -183,7 +183,6 @@
                         :stderr (get-buffer-create
                                  (format "*teamtype %s stderr" directory))
                         :file-handler t)
-                       ;; Removing for demo
                        :notification-dispatcher #'teamtype--notification-dispatcher
                        :on-shutdown (lambda (_conn) (setq teamtype--daemon-connection nil)))))
 
