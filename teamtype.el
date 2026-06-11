@@ -36,6 +36,43 @@
   "Command used to connect to teamtype daemon."
   :type '(repeat string))
 
+(defgroup teamtype-faces ()
+  "Faces used in teamtype"
+  :group 'faces
+  :prefix "teamtype-")
+
+(defface teamtype-other-cursor-face
+  `((((class color) (background dark))
+     :inherit cursor
+     :background ,(color-darken-name
+                   (face-background 'cursor nil t)
+                   50)
+     :foreground "black")
+    (((class color) (background light))
+     :inherit cursor
+     :background ,(color-lighten-name
+                   (face-background 'cursor nil t)
+                   50)
+     :foreground "white")
+    (t :inherit cursor))
+  "Face for shared cursors."
+  :group 'teamtype-faces)
+
+(defface teamtype-other-user-name-face
+  `((((class color) (background light))
+     :inherit shadow
+     :background ,(color-lighten-name
+                   (face-background 'highlight nil t)
+                   50))
+    (((class color) (background dark))
+     :inherit shadow
+     :background ,(color-darken-name
+                   (face-background 'highlight nil t)
+                   50))
+    (t :inherit shadow))
+  "Face for usernames"
+  :group 'teamtype-faces)
+
 (defvar-local teamtype--daemon-connection nil
   "Reference to the current daemon connection.")
 (defvar-local teamtype--editor-revision 0
@@ -72,7 +109,7 @@
          (let ((user-id (plist-get params :userid))
                (user-name (thread-first
                             (concat " " (or (plist-get params :name) "👻"))
-                            (propertize 'face 'shadow))))
+                            (propertize 'face 'teamtype-other-user-name-face))))
            (teamtype--clear-user-cursors user-id)
            (thread-last
              (plist-get params :ranges)
@@ -83,7 +120,8 @@
                    ;; create overlay for cursor
                    (let* ((end (if (= beg end) (+ end 1) end))
                           (overlay (make-overlay beg end)))
-                     (overlay-put overlay 'face 'highlight)
+                     (overlay-put overlay
+                                  'face 'teamtype-other-cursor-face)
                      overlay)
                    ;; create overlay for name at end-of-line
                    ;; XXX: this shows the name for each cursor for the user;
