@@ -212,10 +212,9 @@ If `always', start the client automatically."
 (defun teamtype--current-buffer-uri ()
   (browse-url-file-url (buffer-file-name (current-buffer))))
 
-(defun teamtype--open-file (buffer)
-  (let ((file-uri (browse-url-file-url (buffer-file-name buffer)))
-        (content (with-current-buffer buffer
-                   (buffer-substring-no-properties (point-min) (point-max)))))
+(defun teamtype--open-file ()
+  (let ((file-uri (teamtype--current-buffer-uri))
+        (content (buffer-substring-no-properties (point-min) (point-max))))
     (jsonrpc-async-request
      teamtype--daemon-connection
      :open
@@ -302,8 +301,8 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     (setq teamtype--editor-revision 0)
     (setq teamtype--daemon-revision 0)
     (teamtype--connect-to-daemon default-directory)
-    (teamtype--open-file (current-buffer))
     ;; TODO: send :close message after buffer discarded
+    (teamtype--open-file)
     (add-hook 'before-change-functions #'teamtype--before-change nil t)
     (add-hook 'after-change-functions #'teamtype--after-change nil t)
     (add-hook 'post-command-hook #'teamtype--post-command nil t))
