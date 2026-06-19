@@ -31,6 +31,7 @@
 (require 'jsonrpc)
 (require 'browse-url)
 (require 'eglot)
+(require 'color)
 
 (defcustom teamtype-client-command (list "teamtype" "client")
   "Command used to connect to teamtype daemon."
