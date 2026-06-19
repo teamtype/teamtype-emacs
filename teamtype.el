@@ -92,7 +92,8 @@ If `always', start the client automatically."
   :group 'teamtype-faces)
 
 (defvar teamtype--daemon-connections nil
-  "Reference to the current daemon connections.")
+  "Reference to the current daemon connections, as an alist of
+  `(directory refcount . connection)'.")
 (defvar-local teamtype--daemon-connection nil
   "Buffer-local current daemon connection.")
 (defvar-local teamtype--editor-revision 0
@@ -210,6 +211,7 @@ If `always', start the client automatically."
                                                                     #'string=))))))
     (progn
       (setq teamtype--daemon-connections
+            ;; alist of project-dir, reference-count, connection object
             (cons `(,directory 1 . ,conn) teamtype--daemon-connections))
       conn)))
 
@@ -223,6 +225,11 @@ If `always', start the client automatically."
   (browse-url-file-url (buffer-file-name (current-buffer))))
 
 (defun teamtype--get-daemon-connection ()
+  "Get connection to the Teamtype daemon for the project directory
+containing the current buffer. If one already exists in
+`teamtype--daemon-connections', increment the reference count; other
+create one. In either case, set the connection to the (buffer-local)
+variable `teamtype--daemon-connection'."
   (thread-last
     (let ((dir (teamtype--project-root-directory)))
       (if-let* ((dir-count-conn (assoc-string dir teamtype--daemon-connections)))
