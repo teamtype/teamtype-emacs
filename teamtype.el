@@ -33,13 +33,30 @@
 (require 'eglot)
 (require 'color)
 
+(defgroup teamtype ()
+  "Teamtype configuration options.")
+
 (defcustom teamtype-client-command (list "teamtype" "client")
   "Command used to connect to teamtype daemon."
-  :type '(repeat string))
+  :type '(repeat string)
+  :group 'teamtype)
+
+(defcustom teamtype-auto-connect 'ask
+  "Automatically start the teamtype client when opening a file in a
+  directory with a `.teamtype' directory.
+
+If `ask', prompt the user before starting the client.
+If `never', do not automatically start the client.
+If `always', start the client automatically."
+  :type '(choice (const :tag "Ask when opening a file" ask)
+                 (const :tag "Never automatically connect" never)
+                 (const :tag "Always automatically connect" always))
+  :group 'teamtype)
 
 (defgroup teamtype-faces ()
   "Faces used in teamtype"
   :group 'faces
+  :group 'teamtype
   :prefix "teamtype-")
 
 (defface teamtype-other-cursor-face
@@ -300,6 +317,21 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     (remove-hook 'post-command-hook #'teamtype--post-command t)
     (remove-hook 'before-change-functions #'teamtype--before-change t)
     (remove-hook 'after-change-functions #'teamtype--after-change t))))
+
+(defun teamtype--maybe-auto-start-connection ()
+  "Check if the current file is in a teamtype-monitored directory and
+  possibly automatically start the client connection, based on the
+  value of `teamtype-auto-connect'."
+  (unless (eq teamtype-auto-connect 'never)
+    (when-let* ((tt-dir (locate-dominating-file (buffer-file-name (current-buffer))
+                                                ;; TODO: check if .teamtype is a directory?
+                                                ;; TODO: check if socket exists/daemon is running?
+                                                ".teamtype")))
+      (when (or (eq teamtype-auto-connect 'always)
+                (y-or-n-p (concat "Connect to Teamtype daemon at " tt-dir ": ")))
+        (teamtype-client-mode +1)))))
+
+(add-hook 'find-file-hook #'teamtype--maybe-auto-start-connection)
 
 (provide 'teamtype)
 ;;; teamtype.el ends here
