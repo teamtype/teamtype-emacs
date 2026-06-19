@@ -91,8 +91,10 @@ If `always', start the client automatically."
   "Face for usernames"
   :group 'teamtype-faces)
 
+(defvar teamtype--daemon-connections nil
+  "Reference to the current daemon connections.")
 (defvar-local teamtype--daemon-connection nil
-  "Reference to the current daemon connection.")
+  "Buffer-local current daemon connection.")
 (defvar-local teamtype--editor-revision 0
   "Editor revision in the current buffer.")
 (defvar-local teamtype--daemon-revision 0
@@ -109,7 +111,7 @@ If `always', start the client automatically."
 (defvar-local teamtype--applying-server-edits nil)
 
 (defun teamtype--clear-user-cursors (userid)
-  (when-let ((user-overlays (assoc-string userid teamtype--cursors)))
+  (when-let* ((user-overlays (assoc-string userid teamtype--cursors)))
     (cl-map nil #'delete-overlay (cdr user-overlays))
     (setf (cdr user-overlays) nil)))
 
@@ -188,29 +190,62 @@ If `always', start the client automatically."
 
 (defun teamtype--connect-to-daemon (directory)
   "Create a connection to the daemon in the current directory"
-  (setq teamtype--daemon-connection
-        (make-instance 'jsonrpc-process-connection
-                       :name (concat "teamtype client" directory)
-                       :process
-                       (make-process
-                        :name (concat "teamtype client" directory)
-                        :command teamtype-client-command
-                        :connection-type 'pipe
-                        :coding 'utf-8-emacs-unix
-                        :noquery t
-                        :stderr (get-buffer-create
-                                 (format "*teamtype %s stderr" directory))
-                        :file-handler t)
-                       :notification-dispatcher #'teamtype--notification-dispatcher
-                       :on-shutdown (lambda (_conn) (setq teamtype--daemon-connection nil)))))
+  (let ((conn (make-instance 'jsonrpc-process-connection
+                             :name (concat "teamtype client" directory)
+                             :process
+                             (make-process
+                              :name (concat "teamtype client" directory)
+                              :command teamtype-client-command
+                              :connection-type 'pipe
+                              :coding 'utf-8-emacs-unix
+                              :noquery t
+                              :stderr (get-buffer-create
+                                       (format "*teamtype %s stderr" directory))
+                              :file-handler t)
+                             :notification-dispatcher #'teamtype--notification-dispatcher
+                             :on-shutdown (lambda (_conn)
+                                            (setq teamtype--daemon-connections
+                                                  (assoc-delete-all directory
+                                                                    teamtype--daemon-connections
+                                                                    #'string=))))))
+    (progn
+      (setq teamtype--daemon-connections
+            (cons `(,directory 1 . ,conn) teamtype--daemon-connections))
+      conn)))
 
-(defun teamtype--disconnect-from-daemon ()
-  (when teamtype--daemon-connection
-    ;; TODO: send something to say we're going away?
-    (jsonrpc-shutdown teamtype--daemon-connection)))
+(defun teamtype--project-root-directory ()
+  (thread-first
+    (current-buffer)
+    (buffer-file-name)
+    (locate-dominating-file ".teamtype")))
 
 (defun teamtype--current-buffer-uri ()
   (browse-url-file-url (buffer-file-name (current-buffer))))
+
+(defun teamtype--get-daemon-connection ()
+  (thread-last
+    (let ((dir (teamtype--project-root-directory)))
+      (if-let* ((dir-count-conn (assoc-string dir teamtype--daemon-connections)))
+          (progn
+            (incf (cadr dir-count-conn) 1)
+            (cddr dir-count-conn))
+        (teamtype--connect-to-daemon dir)))
+    (setq teamtype--daemon-connection)))
+
+(defun teamtype--disconnect-from-daemon ()
+  (when teamtype--daemon-connection
+    (jsonrpc-async-request
+     teamtype--daemon-connection
+     :close
+     (list :uri (teamtype--current-buffer-uri)))
+    (if-let* ((dir-count-conn (assoc-string
+                                (teamtype--project-root-directory)
+                                teamtype--daemon-connections)))
+        (progn
+          (decf (cadr dir-count-conn) 1)
+          (when (zerop (cadr dir-count-conn))
+            (jsonrpc-shutdown teamtype--daemon-connection)))
+      (warn "Couldn't find Teamtype connection!"))))
 
 (defun teamtype--open-file ()
   (let ((file-uri (teamtype--current-buffer-uri))
@@ -284,6 +319,9 @@ If `always', start the client automatically."
       t
     (funcall f filename)))
 
+(defun teamtype--shutdown ()
+  (teamtype-client-mode -1))
+
 (define-minor-mode teamtype-client-mode
   "Minor mode for editing a document that is being collaborated with via Teamtype.
 Run when editing a file in a directory managed by the Teamtype daemon (i.e. the direction in which either `teamtype share` or' `teamtype join ...' has been run."
@@ -300,12 +338,12 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     (advice-add 'ask-user-about-supersession-threat :around #'teamtype--supersession-threat-wrapper)
     (setq teamtype--editor-revision 0)
     (setq teamtype--daemon-revision 0)
-    (teamtype--connect-to-daemon default-directory)
-    ;; TODO: send :close message after buffer discarded
+    (teamtype--get-daemon-connection)
     (teamtype--open-file)
     (add-hook 'before-change-functions #'teamtype--before-change nil t)
     (add-hook 'after-change-functions #'teamtype--after-change nil t)
-    (add-hook 'post-command-hook #'teamtype--post-command nil t))
+    (add-hook 'post-command-hook #'teamtype--post-command nil t)
+    (add-hook 'kill-buffer-hook #'teamtype--shutdown nil t))
    (t
     (advice-remove 'ask-user-about-supersession-threat
                    #'teamtype--supersession-threat-wrapper)
@@ -315,7 +353,8 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     (teamtype--disconnect-from-daemon)
     (remove-hook 'post-command-hook #'teamtype--post-command t)
     (remove-hook 'before-change-functions #'teamtype--before-change t)
-    (remove-hook 'after-change-functions #'teamtype--after-change t))))
+    (remove-hook 'after-change-functions #'teamtype--after-change t)
+    (remove-hook 'kill-buffer-hook #'teamtype--shutdown t))))
 
 (defun teamtype--maybe-auto-start-connection ()
   "Check if the current file is in a teamtype-monitored directory and
