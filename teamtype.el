@@ -186,8 +186,12 @@ If `always', start the client automatically."
                           (replace-region-contents beg end (lambda () replacement))))))
                    (undo-amalgamate-change-group change-group)))
                (setf teamtype--applying-server-edits nil))
-           (warn "Got out-of-sync TeamType revision! Got %s, expected %s"
-                 (plist-get params :revision) teamtype--editor-revision)))))))
+           (display-warning
+            'teamtype
+            (format-message
+             "Got out-of-sync TeamType revision! Got %s, expected %s"
+             (plist-get params :revision) teamtype--editor-revision)
+            :debug)))))))
 
 (defun teamtype--connect-to-daemon (directory)
   "Create a connection to the daemon in the current directory"
