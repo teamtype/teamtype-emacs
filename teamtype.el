@@ -121,9 +121,9 @@ If `always', start the client automatically."
     (eglot-range-region range)))
 
 (defun teamtype--notification-dispatcher (_conn method params)
-  (let ((edited-buffer (thread-first (plist-get params :uri)
-                                     (teamtype--uri-to-path)
-                                     (get-file-buffer))))
+  (when-let* ((edited-buffer (thread-first (plist-get params :uri)
+                                           (teamtype--uri-to-path)
+                                           (get-file-buffer))))
     (with-current-buffer edited-buffer
       (cl-case method
         (cursor
