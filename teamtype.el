@@ -234,7 +234,7 @@ variable `teamtype--daemon-connection'."
     (let ((dir (teamtype--project-root-directory)))
       (if-let* ((dir-count-conn (assoc-string dir teamtype--daemon-connections)))
           (progn
-            (incf (cadr dir-count-conn) 1)
+            (cl-incf (cadr dir-count-conn) 1)
             (cddr dir-count-conn))
         (teamtype--connect-to-daemon dir)))
     (setq teamtype--daemon-connection)))
