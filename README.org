@@ -1,0 +1,43 @@
+* Teamtype for Emacs
+
+This plugin adds real-time collaborative editing functionality to Emacs.
+You can use it for pair programming or note-taking for example.
+Teamtype is editor-agnostic, so you can collaborate with people who are using other editors.
+
+This plugin requires at least Emacs 30.1.
+
+** Installation
+
+#+begin_src elisp
+;; Using emacs 30+
+(use-package teamtype
+  :vc (:url "https://github.com/teamtype/teamtype-emacs"
+       :rev :newest
+       :lisp-dir "."))
+;; Using straight
+(use-package teamtype
+  :straight (teamtype
+             :type git
+             :host github
+             :repo "teamtype/teamtype-emacs"))
+#+end_src
+
+** Usage
+
+1. Start a Teamtype daemon in a directory by either running ~teamtype share~ or ~teamtype join <join code>~.
+2. Activate the ~teamtype-client-mode~ minor mode for a file in that directory.
+   This will connect the buffer to the Teamtype daemon, you should see a message like "Editor #n connected".
+3. Start collaborating, you should be able to see the cursors and edits from other peers.
+
+** Customization
+
+*** Options
+
+- ~teamtype-client-command~ :: Argument list to start a client; default ~'("teamtype" "client")~
+- ~teamtype-auto-connect~ :: Whether to always connect to the daemon when opening a file in a monitored directory.
+  Values ~'ask~, ~'always~, ~'never~.
+
+*** Faces
+
+- ~teamtype-other-cursor-face~ :: Face to display other cursors in file with
+- ~teamtype-other-user-name-face~ :: Face to display other editor names in
