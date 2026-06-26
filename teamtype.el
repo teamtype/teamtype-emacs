@@ -100,7 +100,7 @@ If `always', start the client automatically."
   "Editor revision in the current buffer.")
 (defvar-local teamtype--daemon-revision 0
   "Daemon revision in the current buffer.")
-(defvar-local teamtype--cursors nil
+(defvar teamtype--cursors nil
   "Associates user IDs with the cursor overlays.")
 
 (defun teamtype--uri-to-path (uri)
@@ -114,7 +114,7 @@ If `always', start the client automatically."
 (defun teamtype--clear-user-cursors (userid)
   (when-let* ((user-overlays (assoc-string userid teamtype--cursors)))
     (cl-map nil #'delete-overlay (cdr user-overlays))
-    (setf (cdr user-overlays) nil)))
+    (setq teamtype--cursors (assoc-delete-all userid teamtype--cursors #'string=))))
 
 (defun teamtype--range-region (range)
   (let ((eglot-move-to-linepos-function #'eglot-move-to-utf-32-linepos))
@@ -124,15 +124,16 @@ If `always', start the client automatically."
   (when-let* ((edited-buffer (thread-first (plist-get params :uri)
                                            (teamtype--uri-to-path)
                                            (get-file-buffer))))
+    ;; XXX: because we skip everything if there is no extant buffer
+    ;; associated with the file for this notification, no overlays for
+    ;; cursors get created for files not yet being edited, which means
+    ;; we can't jump to those cursors.
+    ;; this also means that when you go to a file after the other user
+    ;; is there, you don't see their cursor initially...
     (with-current-buffer edited-buffer
       (cl-case method
         (cursor
-         (let ((user-id (plist-get params :userid))
-               (user-name (concat
-                           " "
-                           (thread-first
-                             (or (plist-get params :name) "👻")
-                             (propertize 'face 'teamtype-other-user-name-face)))))
+         (let ((user-id (plist-get params :userid)))
            (teamtype--clear-user-cursors user-id)
            (thread-last
              (plist-get params :ranges)
@@ -145,6 +146,13 @@ If `always', start the client automatically."
                           (overlay (make-overlay beg end)))
                      (overlay-put overlay
                                   'face 'teamtype-other-cursor-face)
+                     (overlay-put overlay
+                                  'teamtype-user-cursor
+                                  (format "%s @ %s:%s"
+                                          (plist-get params :name)
+                                          (buffer-name)
+                                          (line-number-at-pos beg t)))
+
                      overlay)
                    ;; create overlay for name at end-of-line
                    ;; XXX: this shows the name for each cursor for the user;
@@ -156,7 +164,12 @@ If `always', start the client automatically."
                                  (goto-char beg)
                                  (end-of-line)
                                  (point)))
-                          (overlay (make-overlay eol eol)))
+                          (overlay (make-overlay eol eol))
+                          (user-name (concat
+                                      " "
+                                      (thread-first
+                                        (or (plist-get params :name) "👻")
+                                        (propertize 'face 'teamtype-other-user-name-face)))))
                      (overlay-put overlay 'after-string user-name)
                      overlay)))))
              (cons user-id)
@@ -253,7 +266,7 @@ variable `teamtype--daemon-connection'."
                                (teamtype--project-root-directory)
                                teamtype--daemon-connections)))
         (progn
-          (decf (cadr dir-count-conn) 1)
+          (cl-decf (cadr dir-count-conn) 1)
           (when (zerop (cadr dir-count-conn))
             (jsonrpc-shutdown teamtype--daemon-connection)))
       (warn "Couldn't find Teamtype connection!"))))
@@ -333,6 +346,46 @@ variable `teamtype--daemon-connection'."
 (defun teamtype--shutdown ()
   (teamtype-client-mode -1))
 
+(defun teamtype--active-user-cursors ()
+  "Returns a list of overlays that represent remote cursors. They have
+a 'teamtype-user-cursor' property."
+  (cl-delete-if-not
+   (lambda (overlay) (overlay-get overlay 'teamtype-user-cursor))
+   (flatten-list
+    (mapcar #'cdr teamtype--cursors))))
+
+(defun teamtype--display-cursor-candidate (overlay)
+  (overlay-get overlay 'teamtype-user-cursor))
+
+(defun teamtype-jump-to-cursor ()
+  "Jump to a peer's cursor."
+  (interactive)
+  (let* ((name-position-overlays (mapcar
+                                  (lambda (overlay)
+                                    (cons (overlay-get overlay 'teamtype-user-cursor)
+                                          overlay))
+                                  (teamtype--active-user-cursors)))
+         (selected-name (completing-read
+                         "User: "
+                         (lambda (input predicate action)
+                           (if (eq action 'metadata)
+                               '(metadata
+                                 (category . teamtype-user)
+                                 (display-sort-function . identity)
+                                 (cycle-sort-function . identity))
+                             (complete-with-action action
+                                                   name-position-overlays
+                                                   input
+                                                   predicate)))))
+         (selected-overlay (cdr (assoc selected-name name-position-overlays))))
+    (when selected-overlay
+      (switch-to-buffer (overlay-buffer selected-overlay))
+      (goto-char (overlay-start selected-overlay)))))
+
+(defconst teamtype-client-mode-map
+  (define-keymap
+    "C-c C-j" #'teamtype-jump-to-cursor))
+
 (define-minor-mode teamtype-client-mode
   "Minor mode for editing a document that is being collaborated with via Teamtype.
 Run when editing a file in a directory managed by the Teamtype daemon (i.e. the direction in which either `teamtype share` or' `teamtype join ...' has been run."
@@ -354,7 +407,7 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     (add-hook 'before-change-functions #'teamtype--before-change nil t)
     (add-hook 'after-change-functions #'teamtype--after-change nil t)
     (add-hook 'post-command-hook #'teamtype--post-command nil t)
-    (add-hook 'kill-buffer-hook #'teamtype--shutdown nil t))
+    (add-hook 'kill-buffer-hook #'teamtype--shutdown nil t)) ;
    (t
     (advice-remove 'ask-user-about-supersession-threat
                    #'teamtype--supersession-threat-wrapper)
