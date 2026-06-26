@@ -114,7 +114,7 @@ If `always', start the client automatically."
 (defun teamtype--clear-user-cursors (userid)
   (when-let* ((user-overlays (assoc-string userid teamtype--cursors)))
     (cl-map nil #'delete-overlay (cdr user-overlays))
-    (assoc-delete-all userid teamtype--cursors #'string=)))
+    (setq teamtype--cursors (assoc-delete-all userid teamtype--cursors #'string=))))
 
 (defun teamtype--range-region (range)
   (let ((eglot-move-to-linepos-function #'eglot-move-to-utf-32-linepos))
