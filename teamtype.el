@@ -250,8 +250,8 @@ variable `teamtype--daemon-connection'."
      :close
      (list :uri (teamtype--current-buffer-uri)))
     (if-let* ((dir-count-conn (assoc-string
-                                (teamtype--project-root-directory)
-                                teamtype--daemon-connections)))
+                               (teamtype--project-root-directory)
+                               teamtype--daemon-connections)))
         (progn
           (decf (cadr dir-count-conn) 1)
           (when (zerop (cadr dir-count-conn))
@@ -344,7 +344,7 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     (auto-revert-mode -1)
     ;; Make global-auto-revert-mode ignore this buffer
     (when (boundp 'inhibit-auto-revert-buffers)
-     (add-to-list 'inhibit-auto-revert-buffers (current-buffer)))
+      (add-to-list 'inhibit-auto-revert-buffers (current-buffer)))
     ;; Don't warn about buffer edits when file is changing out from under us
     (advice-add 'ask-user-about-supersession-threat :around #'teamtype--supersession-threat-wrapper)
     (setq teamtype--editor-revision 0)
@@ -359,8 +359,8 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     (advice-remove 'ask-user-about-supersession-threat
                    #'teamtype--supersession-threat-wrapper)
     (when (boundp 'inhibit-auto-revert-buffers)
-     (setq inhibit-auto-revert-buffers
-           (delq (current-buffer) inhibit-auto-revert-buffers)))
+      (setq inhibit-auto-revert-buffers
+            (delq (current-buffer) inhibit-auto-revert-buffers)))
     (teamtype--disconnect-from-daemon)
     (remove-hook 'post-command-hook #'teamtype--post-command t)
     (remove-hook 'before-change-functions #'teamtype--before-change t)
