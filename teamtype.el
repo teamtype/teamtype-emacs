@@ -100,7 +100,7 @@ If `always', start the client automatically."
   "Editor revision in the current buffer.")
 (defvar-local teamtype--daemon-revision 0
   "Daemon revision in the current buffer.")
-(defvar-local teamtype--cursors nil
+(defvar teamtype--cursors nil
   "Associates user IDs with the cursor overlays.")
 
 (defun teamtype--uri-to-path (uri)
