@@ -114,7 +114,7 @@ If `always', start the client automatically."
 (defun teamtype--clear-user-cursors (userid)
   (when-let* ((user-overlays (assoc-string userid teamtype--cursors)))
     (cl-map nil #'delete-overlay (cdr user-overlays))
-    (setf (cdr user-overlays) nil)))
+    (assoc-delete-all userid teamtype--cursors #'string=)))
 
 (defun teamtype--range-region (range)
   (let ((eglot-move-to-linepos-function #'eglot-move-to-utf-32-linepos))
@@ -253,7 +253,7 @@ variable `teamtype--daemon-connection'."
                                (teamtype--project-root-directory)
                                teamtype--daemon-connections)))
         (progn
-          (decf (cadr dir-count-conn) 1)
+          (cl-decf (cadr dir-count-conn) 1)
           (when (zerop (cadr dir-count-conn))
             (jsonrpc-shutdown teamtype--daemon-connection)))
       (warn "Couldn't find Teamtype connection!"))))
@@ -333,6 +333,22 @@ variable `teamtype--daemon-connection'."
 (defun teamtype--shutdown ()
   (teamtype-client-mode -1))
 
+(defun teamtype-jump-to-cursor (user-id)
+  "Jump to a peer's cursor."
+  (interactive (list (completing-read
+                      "User: "
+                      (lambda (input predicate action)
+                        (if (eq action 'metadata)
+                            '(metadata
+                              (category . teamtype-user)
+                              (display-sort-function . identity)
+                              (cycle-sort-function . identity))
+
+                          (complete-with-action action
+                                                (mapcar #'car teamtype--cursors)
+                                                input
+                                                predicate)))))))
+                                                
 (define-minor-mode teamtype-client-mode
   "Minor mode for editing a document that is being collaborated with via Teamtype.
 Run when editing a file in a directory managed by the Teamtype daemon (i.e. the direction in which either `teamtype share` or' `teamtype join ...' has been run."
