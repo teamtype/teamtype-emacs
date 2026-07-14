@@ -378,7 +378,7 @@ a 'teamtype-user-cursor' property."
                                                    input
                                                    predicate)))))
          (selected-overlay (cdr (assoc selected-name name-position-overlays))))
-    (when selected-overlay
+    (when (and selected-overlay (overlay-buffer selected-overlay))
       (switch-to-buffer (overlay-buffer selected-overlay))
       (goto-char (overlay-start selected-overlay)))))
 
