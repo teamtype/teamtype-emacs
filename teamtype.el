@@ -1,4 +1,4 @@
-;;; teamtype.el --- Emacs module for TeamType collaborative editing  -*- lexical-binding: t; -*-
+;;; teamtype.el --- Emacs module for Teamtype collaborative editing  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 Jamie Cash, blinry
 
@@ -104,23 +104,110 @@ If `always', start the client automatically."
   "Associates user IDs with the cursor overlays.")
 
 (defun teamtype--uri-to-path (uri)
-  "Convert file:// uri from TeamType to file path."
+  "Convert file:// uri from Teamtype to file path."
   (let ((url (url-generic-parse-url uri)))
     (when (string= "file" (url-type url))
       (url-unhex-string (url-filename url)))))
 
-(defvar-local teamtype--applying-server-edits nil)
+(defvar-local teamtype--applying-server-edits nil
+  "Flag to indicate if a remote edit is being applied, to prevent recursive updates.")
 
 (defun teamtype--clear-user-cursors (userid)
+  "Removes any cursors for user with id `userid'. Used in response to
+messages (instead of moving overlays)."
   (when-let* ((user-overlays (assoc-string userid teamtype--cursors)))
     (cl-map nil #'delete-overlay (cdr user-overlays))
     (setq teamtype--cursors (assoc-delete-all userid teamtype--cursors #'string=))))
 
 (defun teamtype--range-region (range)
+  "Wrapper around `eglot-range-region' to convert JSON-RPC-style range
+  (that have a line + column) to a cons of buffer positions, forcing
+  utf-32 column positions to comport with Teamtype's convention."
   (let ((eglot-move-to-linepos-function #'eglot-move-to-utf-32-linepos))
     (eglot-range-region range)))
 
+(defun teamtype--handle-cursor-message (edited-buffer params)
+  "Handle a `cursor' message from the Teamtype daemon."
+  (with-current-buffer edited-buffer
+    (let ((user-id (plist-get params :userid)))
+      (teamtype--clear-user-cursors user-id)
+      (thread-last
+        (plist-get params :ranges)
+        (cl-mapcan
+         (lambda (range)
+           (pcase-let ((`(,beg . ,end) (teamtype--range-region range)))
+             (list
+              ;; create overlay for cursor
+              (let* ((end (if (= beg end) (+ end 1) end))
+                     (overlay (make-overlay beg end)))
+                (overlay-put overlay
+                             'face 'teamtype-other-cursor-face)
+                (overlay-put overlay
+                             'teamtype-user-cursor
+                             (format "%s @ %s:%s"
+                                     (plist-get params :name)
+                                     (buffer-name)
+                                     (line-number-at-pos beg t)))
+
+                overlay)
+              ;; create overlay for name at end-of-line
+              ;; XXX: this shows the name for each cursor for the user;
+              ;; kind of weird for, e.g. vim's block-selection,
+              ;; but we want this for true-multi-cursor. Perhaps
+              ;; sort by line and only show the name when there's
+              ;; a discontinuity?
+              (let* ((eol (save-excursion
+                            (goto-char beg)
+                            (end-of-line)
+                            (point)))
+                     (overlay (make-overlay eol eol))
+                     (user-name (concat
+                                 " "
+                                 (thread-first
+                                   (or (plist-get params :name) "👻")
+                                   (propertize 'face 'teamtype-other-user-name-face)))))
+                (overlay-put overlay 'after-string user-name)
+                overlay)))))
+        (cons user-id)
+        ((lambda (overlays) (push overlays teamtype--cursors)))))))
+
+(defun teamtype--handle-edit-message (edited-buffer params)
+  "Handle an `edit' message from the Teamtype daemon."
+  (with-current-buffer edited-buffer
+    (if (= (plist-get params :revision) teamtype--editor-revision)
+        (progn
+          (setf teamtype--applying-server-edits t)
+          (atomic-change-group
+            (let ((change-group (prepare-change-group))
+                  (replacement (plist-get params :replacement)))
+              (cl-incf teamtype--daemon-revision)
+              (thread-last
+                (plist-get params :delta)
+                (reverse)
+                (mapcar
+                 (lambda (edit)
+                   (pcase-let ((`(,beg . ,end) (teamtype--range-region (plist-get edit :range)))
+                               (replacement (plist-get edit :replacement)))
+                     `(,beg ,end . ,replacement))))
+                (mapc
+                 (pcase-lambda (`(,beg ,end . ,replacement))
+                   ;; TODO: could use Emacs <30 if we replace `replace-region-contents'
+                   ;; with a fallback (see `eglot--apply-text-edits' for example)
+                   (if (> emacs-major-version 30)
+                       (replace-region-contents beg end replacement)
+                     (replace-region-contents beg end (lambda () replacement))))))
+              (undo-amalgamate-change-group change-group)))
+          (setf teamtype--applying-server-edits nil))
+      (display-warning
+       'teamtype
+       (format-message
+        "Got out-of-sync Teamtype revision! Got %s, expected %s"
+        (plist-get params :revision) teamtype--editor-revision)
+       :debug))))
+
 (defun teamtype--notification-dispatcher (_conn method params)
+  "Dispatches notifications from the Teamtype daemon for messages for
+files that have currently opened buffers."
   (when-let* ((edited-buffer (thread-first (plist-get params :uri)
                                            (teamtype--uri-to-path)
                                            (get-file-buffer))))
@@ -130,84 +217,12 @@ If `always', start the client automatically."
     ;; we can't jump to those cursors.
     ;; this also means that when you go to a file after the other user
     ;; is there, you don't see their cursor initially...
-    (with-current-buffer edited-buffer
-      (cl-case method
-        (cursor
-         (let ((user-id (plist-get params :userid)))
-           (teamtype--clear-user-cursors user-id)
-           (thread-last
-             (plist-get params :ranges)
-             (cl-mapcan
-              (lambda (range)
-                (pcase-let ((`(,beg . ,end) (teamtype--range-region range)))
-                  (list
-                   ;; create overlay for cursor
-                   (let* ((end (if (= beg end) (+ end 1) end))
-                          (overlay (make-overlay beg end)))
-                     (overlay-put overlay
-                                  'face 'teamtype-other-cursor-face)
-                     (overlay-put overlay
-                                  'teamtype-user-cursor
-                                  (format "%s @ %s:%s"
-                                          (plist-get params :name)
-                                          (buffer-name)
-                                          (line-number-at-pos beg t)))
-
-                     overlay)
-                   ;; create overlay for name at end-of-line
-                   ;; XXX: this shows the name for each cursor for the user;
-                   ;; kind of weird for, e.g. vim's block-selection,
-                   ;; but we want this for true-multi-cursor. Perhaps
-                   ;; sort by line and only show the name when there's
-                   ;; a discontinuity?
-                   (let* ((eol (save-excursion
-                                 (goto-char beg)
-                                 (end-of-line)
-                                 (point)))
-                          (overlay (make-overlay eol eol))
-                          (user-name (concat
-                                      " "
-                                      (thread-first
-                                        (or (plist-get params :name) "👻")
-                                        (propertize 'face 'teamtype-other-user-name-face)))))
-                     (overlay-put overlay 'after-string user-name)
-                     overlay)))))
-             (cons user-id)
-             ((lambda (overlays) (push overlays teamtype--cursors))))))
-        (edit
-         (if (= (plist-get params :revision) teamtype--editor-revision)
-             (progn
-               (setf teamtype--applying-server-edits t)
-               (atomic-change-group
-                 (let ((change-group (prepare-change-group))
-                       (replacement (plist-get params :replacement)))
-                   (cl-incf teamtype--daemon-revision)
-                   (thread-last
-                     (plist-get params :delta)
-                     (reverse)
-                     (mapcar
-                      (lambda (edit)
-                        (pcase-let ((`(,beg . ,end) (teamtype--range-region (plist-get edit :range)))
-                                    (replacement (plist-get edit :replacement)))
-                          `(,beg ,end . ,replacement))))
-                     (mapc
-                      (pcase-lambda (`(,beg ,end . ,replacement))
-                        ;; TODO: could use Emacs <30 if we replace `replace-region-contents'
-                        ;; with a fallback (see `eglot--apply-text-edits' for example)
-                        (if (> emacs-major-version 30)
-                            (replace-region-contents beg end replacement)
-                          (replace-region-contents beg end (lambda () replacement))))))
-                   (undo-amalgamate-change-group change-group)))
-               (setf teamtype--applying-server-edits nil))
-           (display-warning
-            'teamtype
-            (format-message
-             "Got out-of-sync TeamType revision! Got %s, expected %s"
-             (plist-get params :revision) teamtype--editor-revision)
-            :debug)))))))
+    (cl-case method
+      (cursor (teamtype--handle-cursor-message edited-buffer params))
+      (edit (teamtype--handle-edit-message edited-buffer params)))))
 
 (defun teamtype--connect-to-daemon (directory)
-  "Create a connection to the daemon in the current directory"
+  "Create a connection to the daemon in the current directory."
   (let ((conn (make-instance 'jsonrpc-process-connection
                              :name (concat "teamtype client" directory)
                              :process
@@ -233,19 +248,24 @@ If `always', start the client automatically."
       conn)))
 
 (defun teamtype--project-root-directory ()
+  "Seek up the parent directories and return the first one containing a .teamtype entry."
   (thread-first
     (current-buffer)
     (buffer-file-name)
+    ;; TODO: check if .teamtype is a directory?
     (locate-dominating-file ".teamtype")))
 
 (defun teamtype--current-buffer-uri ()
-  (browse-url-file-url (buffer-file-name (current-buffer))))
+  (thread-first
+    (current-buffer)
+    (buffer-file-name)
+    (browse-url-file-url)))
 
 (defun teamtype--get-daemon-connection ()
   "Get connection to the Teamtype daemon for the project directory
 containing the current buffer. If one already exists in
-`teamtype--daemon-connections', increment the reference count; other
-create one. In either case, set the connection to the (buffer-local)
+`teamtype--daemon-connections', increment the reference count; otherwise
+create one. In either case, assign the connection to the (buffer-local)
 variable `teamtype--daemon-connection'."
   (thread-last
     (let ((dir (teamtype--project-root-directory)))
@@ -256,7 +276,10 @@ variable `teamtype--daemon-connection'."
         (teamtype--connect-to-daemon dir)))
     (setq teamtype--daemon-connection)))
 
-(defun teamtype--disconnect-from-daemon ()
+(defun teamtype--close-file ()
+  "Sends a close message to the daemon for the current buffer's file
+and decrements the reference count for that connection. If the
+reference count hits zero as a result, shutdown the connection."
   (when teamtype--daemon-connection
     (jsonrpc-async-request
      teamtype--daemon-connection
@@ -272,6 +295,9 @@ variable `teamtype--daemon-connection'."
       (warn "Couldn't find Teamtype connection!"))))
 
 (defun teamtype--open-file ()
+  "Sends an open message to the daemon for the current buffer's file, first
+setting the buffer-local `teamtype--daemon-connection'."
+  (teamtype--get-daemon-connection)
   (let ((file-uri (teamtype--current-buffer-uri))
         (content (buffer-substring-no-properties (point-min) (point-max))))
     (jsonrpc-async-request
@@ -281,20 +307,28 @@ variable `teamtype--daemon-connection'."
            :content content))))
 
 (defun teamtype--pos-to-teamtype-position (pos)
+  "Convert an Emacs position to a Teamtype-format JSON
+line-and-character position."
   (eglot--widening
    (list :line (1- (line-number-at-pos pos t))
          :character (progn (goto-char pos)
                            (eglot-utf-32-linepos)))))
 
-(defvar-local teamtype--edit-start nil)
-(defvar-local teamtype--edit-end nil)
+(defvar-local teamtype--edit-start nil
+  "Location of the start of the most recent edit *before* the edit has taken place.")
+(defvar-local teamtype--edit-end nil
+  "Location of the end of the most recent edit *before* the edit has taken place.")
 
 (defun teamtype--before-change (start end)
+  "Set the start and end positions before the edit. Used as a
+`before-change-functions' hook."
   (unless teamtype--applying-server-edits
     (setq teamtype--edit-start (teamtype--pos-to-teamtype-position start)
           teamtype--edit-end (teamtype--pos-to-teamtype-position end))))
 
 (defun teamtype--after-change (start end length)
+  "In this callback, we now know the replacement text, and send out an
+edit to the daemon. Used as an `after-change-functions' hook."
   (unless teamtype--applying-server-edits
     (cl-incf teamtype--editor-revision)
     ;; TODO: debounce this?
@@ -308,7 +342,10 @@ variable `teamtype--daemon-connection'."
              :revision teamtype--daemon-revision
              :delta (vector delta))))))
 
-(defvar-local teamtype--my-cursor-position '((0 . 0)))
+(defvar-local teamtype--my-cursor-position '((0 . 0))
+  "Start and end position(s) of the cursor in the current buffer. Used
+  to only send cursor update messages if the cursor has actually
+  moved.")
 
 (defun teamtype--current-cursor-positions ()
   ;; TODO: if evil + visual block mode do something else?
@@ -319,6 +356,8 @@ variable `teamtype--daemon-connection'."
     (list (cons (point) (point)))))
 
 (defun teamtype--post-command ()
+  "If our cursor position has changed, send a cursor message to the
+daemon. Used as a `post-command-hook' hook."
   (let ((here (teamtype--current-cursor-positions)))
     (when (not (equal here teamtype--my-cursor-position))
       (setq teamtype--my-cursor-position here)
@@ -338,7 +377,9 @@ variable `teamtype--daemon-connection'."
 (defvar teamtype-client-mode) ; forward decl
 
 (defun teamtype--supersession-threat-wrapper (f filename)
-  "Wrapper used for `:around' advice to make `ask-user-about-supersession-threat' not worry about the file changing out from under us when being managed by TeamType."
+  "Wrapper used for `:around' advice to make
+`ask-user-about-supersession-threat' not worry about the file changing
+out from under us when being managed by Teamtype."
   (if teamtype-client-mode
       t
     (funcall f filename)))
@@ -355,11 +396,14 @@ a 'teamtype-user-cursor' property."
     (mapcar #'cdr teamtype--cursors))))
 
 (defun teamtype--display-cursor-candidate (overlay)
+  "Helper for completing list of cursors to jump to, getting the user
+name from the overlay's 'teamtype-user-cursor' property."
   (overlay-get overlay 'teamtype-user-cursor))
 
 (defun teamtype-jump-to-cursor ()
   "Jump to a peer's cursor."
   (interactive)
+  ;; TODO: if there is only one other user, just jump to them without asking.
   (let* ((name-position-overlays (mapcar
                                   (lambda (overlay)
                                     (cons (overlay-get overlay 'teamtype-user-cursor)
@@ -382,9 +426,10 @@ a 'teamtype-user-cursor' property."
       (switch-to-buffer (overlay-buffer selected-overlay))
       (goto-char (overlay-start selected-overlay)))))
 
-(defconst teamtype-client-mode-map
-  (define-keymap
-    "C-c C-j" #'teamtype-jump-to-cursor))
+(defvar-keymap teamtype-client-mode-map
+  :parent nil
+  :doc "Keymap for `teamtype-client-mode'."
+  "C-c C-j" #'teamtype-jump-to-cursor)
 
 (define-minor-mode teamtype-client-mode
   "Minor mode for editing a document that is being collaborated with via Teamtype.
@@ -392,17 +437,16 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
   :global nil
   (cond
    (teamtype-client-mode
-    ;; TODO: change default-directory to be parent directory containing .teamtype directory
-    ;; Disable buffer-local auto-revert
+    ;; TODO: Change default-directory to be parent directory containing .teamtype directory.
+    ;; Disable buffer-local auto-revert.
     (auto-revert-mode -1)
-    ;; Make global-auto-revert-mode ignore this buffer
+    ;; Make global-auto-revert-mode ignore this buffer.
     (when (boundp 'inhibit-auto-revert-buffers)
       (add-to-list 'inhibit-auto-revert-buffers (current-buffer)))
-    ;; Don't warn about buffer edits when file is changing out from under us
+    ;; Don't warn about buffer edits when file is changing out from under us.
     (advice-add 'ask-user-about-supersession-threat :around #'teamtype--supersession-threat-wrapper)
     (setq teamtype--editor-revision 0)
     (setq teamtype--daemon-revision 0)
-    (teamtype--get-daemon-connection)
     (teamtype--open-file)
     (add-hook 'before-change-functions #'teamtype--before-change nil t)
     (add-hook 'after-change-functions #'teamtype--after-change nil t)
@@ -414,7 +458,7 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
     (when (boundp 'inhibit-auto-revert-buffers)
       (setq inhibit-auto-revert-buffers
             (delq (current-buffer) inhibit-auto-revert-buffers)))
-    (teamtype--disconnect-from-daemon)
+    (teamtype--close-file)
     (remove-hook 'post-command-hook #'teamtype--post-command t)
     (remove-hook 'before-change-functions #'teamtype--before-change t)
     (remove-hook 'after-change-functions #'teamtype--after-change t)
@@ -423,12 +467,9 @@ Run when editing a file in a directory managed by the Teamtype daemon (i.e. the 
 (defun teamtype--maybe-auto-start-connection ()
   "Check if the current file is in a teamtype-monitored directory and
   possibly automatically start the client connection, based on the
-  value of `teamtype-auto-connect'."
+  value of `teamtype-auto-connect'. Used as a `find-file-hook' hook."
   (unless (eq teamtype-auto-connect 'never)
-    (when-let* ((tt-dir (locate-dominating-file (buffer-file-name (current-buffer))
-                                                ;; TODO: check if .teamtype is a directory?
-                                                ;; TODO: check if socket exists/daemon is running?
-                                                ".teamtype")))
+    (when-let* ((tt-dir (teamtype--project-root-directory)))
       (when (or (eq teamtype-auto-connect 'always)
                 (y-or-n-p (concat "Connect to Teamtype daemon at " tt-dir ": ")))
         (teamtype-client-mode +1)))))
